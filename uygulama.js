@@ -10,7 +10,7 @@ const al = (k) => { try { return localStorage.getItem(k) } catch { return null }
 const tarih = (t) => (t ? new Date(t).toLocaleString('tr-TR', { weekday: 'short', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : '—')
 
 const sb = supabase.createClient(window.AP_AYAR.url, window.AP_AYAR.anahtar, { auth: { flowType: 'pkce', detectSessionInUrl: true, persistSession: true, storageKey: 'pp-oturum' } })
-const d = { giris: null, proje: null, pid: al('pp-proje'), bolum: null, gorunum: 'plan', suzgec: null, ara: '', mpKapali: al('pp-mesaj-kapali') === '1', mpPlan: null, sonMesaj: 0, ses: al('pp-ses') !== '0' }
+const d = { giris: null, proje: null, pid: al('pp-proje'), bolum: null, gorunum: 'plan', suzgec: null, ara: '', mpKapali: al('pp-mesaj-kapali') === '1', mpPlan: null, sonMesaj: 0, ses: al('pp-ses') !== '0', secili: new Set(), okAcik: false }
 
 function tost(m) { const t = document.createElement('div'); t.className = 'tost'; t.textContent = m; document.body.appendChild(t); setTimeout(() => t.remove(), 3500) }
 let ac = null
@@ -113,7 +113,21 @@ function ciz() {
   const q = d.ara.toLocaleUpperCase('tr')
   const bagli = new Map()
   for (const p of planlar()) if (p.anaPlan) bagli.set(p.anaPlan, [...(bagli.get(p.anaPlan) || []), p])
-  const gor = planlar().filter((p) => !p.anaPlan && (!d.suzgec || d.suzgec === 'toplam' || (d.suzgec === 'kalan' ? ['sira', 'cal'].includes(gorunenDurum(p)) : gorunenDurum(p) === d.suzgec)) && (!q || `${p.no} ${p.aciklama}`.toLocaleUpperCase('tr').includes(q)))
+  const araUyar = (p) => !q || `${p.no} ${p.aciklama}`.toLocaleUpperCase('tr').includes(q)
+  // 13.11 (Aytaç): onaylananlar altta ayrı, açılır "Onaylanan planlar" bölümünde (süzgeç "Onaylandı" ise üstte)
+  const gor = planlar().filter((p) => !p.anaPlan && (d.suzgec === 'ok' || gorunenDurum(p) !== 'ok') && (!d.suzgec || d.suzgec === 'toplam' || (d.suzgec === 'kalan' ? ['sira', 'cal'].includes(gorunenDurum(p)) : gorunenDurum(p) === d.suzgec)) && araUyar(p))
+  const okListe = d.suzgec === 'ok' ? [] : planlar().filter((p) => !p.anaPlan && gorunenDurum(p) === 'ok' && araUyar(p))
+  const secilebilir = (p) => ['gon', 'rev', 'eks', 'ok'].includes(gorunenDurum(p))
+  for (const id of [...d.secili]) if (!planlar().some((p) => p.id === id && secilebilir(p))) d.secili.delete(id)
+  const gorSec = gor.filter(secilebilir)
+  const satir = (p) => { const s = gorunenDurum(p), [ad, sinif] = DURUM[s] || DURUM.cal, karar = ['gon', 'rev', 'eks'].includes(s)
+    return `<tr class="${p.acil ? 'acil' : ''}${d.secili.has(p.id) ? ' secili' : ''}"><td class="sec">${secilebilir(p) ? `<input type="checkbox" data-sec="${p.id}" ${d.secili.has(p.id) ? 'checked' : ''} aria-label="${esc(String(p.no).split(' ')[0])} planını seç">` : ''}</td><td class="no">${esc(String(p.no).split(' ')[0])}</td>
+          <td class="acik">${esc(p.aciklama)}${(bagli.get(p.id) || []).map((x) => `<span class="bagli">↳ ${esc(String(x.no).split(' ')[0])} · ${esc(x.aciklama)} (aynı plan)</span>`).join('')}${p.animasalNot ? `<span class="not">Animasal notu: ${esc(p.animasalNot)}</span>` : ''}${p.musteriNot ? `<span class="pmusteri">Sizin notunuz: ${esc(p.musteriNot)}</span>` : ''}${bekleyenKarar(p.id) ? '<span class="pmusteri">Animasal\'a iletiliyor…</span>' : ''}</td>
+          <td><span class="durum ${sinif}">${ad}</span></td>${P.ayar.tahminAcik ? `<td class="tt">${p.tahmin ? tarih(p.tahmin) + '<small>tahmini</small>' : '<small>—</small>'}</td>` : ''}
+          <td>${['ipt', 'ok'].includes(s) ? '' : `<button class="acilbtn" data-acil="${p.id}" aria-pressed="${p.acil}">ACİL</button>`}</td>
+          <td>${karar ? `<div class="karar"><button class="k-ok" data-k="ok" data-p="${p.id}">Onayla</button><button class="k-rev" data-k="rev" data-p="${p.id}">Revize</button><button class="k-eks" data-k="eks" data-p="${p.id}">Eksik</button></div>` : s === 'ok' ? `<div class="karar"><button class="k-rev" data-k="rev" data-p="${p.id}" title="Onayı geri alır, plan revizeye döner">Revize iste</button></div><small class="gizli-not">Onayı geri alır</small>` : s === 'ipt' ? '' : '<small class="gizli-not">Gönderilince karar verilir</small>'}<div id="not-${p.id}"></div><button class="msj-btn" data-msj="${esc(String(p.no).split(' ')[0])}">Bu plan hakkında yaz</button></td></tr>` }
+  const sutun = P.ayar.tahminAcik ? 7 : 6
+  d.ustSecilebilir = gorSec.map((p) => p.id)
   const acil = planlar().filter((p) => p.acil).length
   const ortak = (P.istekler || []).filter((i) => ['ortak', 'karsi'].includes(i.durum))
   $('#kok').innerHTML = `
@@ -134,13 +148,10 @@ function ciz() {
         <input id="ara" type="search" placeholder="Plan no ya da açıklama ara" value="${esc(d.ara)}">
         <span class="acil-say">Acil: <b>${acil}</b> / ${P.ayar.acilSinir}</span>
         <button class="btn ana" id="kalanlar" ${c.gon ? '' : 'disabled'}>Kalanları onayla (${c.gon})</button></div>
-        <div class="tablo-kap"><table><thead><tr><th>Plan</th><th>Açıklama</th><th>Durum</th>${P.ayar.tahminAcik ? '<th>Tahmini</th>' : ''}<th>Acil</th><th>Kararınız</th></tr></thead><tbody>
-        ${gor.map((p) => { const s = gorunenDurum(p), [ad, sinif] = DURUM[s] || DURUM.cal, karar = ['gon', 'ok', 'rev', 'eks'].includes(s)
-          return `<tr class="${p.acil ? 'acil' : ''}"><td class="no">${esc(String(p.no).split(' ')[0])}</td>
-          <td class="acik">${esc(p.aciklama)}${(bagli.get(p.id) || []).map((x) => `<span class="bagli">↳ ${esc(String(x.no).split(' ')[0])} · ${esc(x.aciklama)} (aynı plan)</span>`).join('')}${p.animasalNot ? `<span class="not">Animasal notu: ${esc(p.animasalNot)}</span>` : ''}${p.musteriNot ? `<span class="pmusteri">Sizin notunuz: ${esc(p.musteriNot)}</span>` : ''}${bekleyenKarar(p.id) ? '<span class="pmusteri">Animasal\'a iletiliyor…</span>' : ''}</td>
-          <td><span class="durum ${sinif}">${ad}</span></td>${P.ayar.tahminAcik ? `<td class="tt">${p.tahmin ? tarih(p.tahmin) + '<small>tahmini</small>' : '<small>—</small>'}</td>` : ''}
-          <td>${['ipt', 'ok'].includes(s) ? '' : `<button class="acilbtn" data-acil="${p.id}" aria-pressed="${p.acil}">ACİL</button>`}</td>
-          <td>${karar ? `<div class="karar"><button class="k-ok" data-k="ok" data-p="${p.id}">Onayla</button><button class="k-rev" data-k="rev" data-p="${p.id}">Revize</button><button class="k-eks" data-k="eks" data-p="${p.id}">Eksik</button></div><div id="not-${p.id}"></div>` : s === 'ipt' ? '' : '<small class="gizli-not">Gönderilince karar verilir</small>'}<button class="msj-btn" data-msj="${esc(String(p.no).split(' ')[0])}">Bu plan hakkında yaz</button></td></tr>` }).join('') || '<tr><td colspan="6" class="gizli-not">Plan yok.</td></tr>'}
+        ${d.secili.size ? `<div class="secim-serit" role="region" aria-label="Seçilen planlar"><b>${d.secili.size} plan seçildi</b><button class="btn ana" id="topOk">Onayla</button><button class="btn" id="topRev">Revize</button><button class="btn" id="topEks">Eksik</button><button class="btn" id="secKaldir">Seçimi kaldır</button></div>` : ''}
+        <div class="tablo-kap"><table><thead><tr><th class="sec">${gorSec.length ? `<input type="checkbox" id="hepsiSec" ${gorSec.every((p) => d.secili.has(p.id)) ? 'checked' : ''} aria-label="Listedekilerin hepsini seç">` : ''}</th><th>Plan</th><th>Açıklama</th><th>Durum</th>${P.ayar.tahminAcik ? '<th>Tahmini</th>' : ''}<th>Acil</th><th>Kararınız</th></tr></thead><tbody>
+        ${gor.map(satir).join('') || `<tr><td colspan="${sutun}" class="gizli-not">Plan yok.</td></tr>`}
+        ${okListe.length ? `<tr class="ok-baslik"><td colspan="${sutun}"><button id="okAcKapa" aria-expanded="${d.okAcik}">${d.okAcik ? '▾' : '▸'} Onaylanan planlar (${okListe.length})</button><small class="gizli-not"> · fikriniz değişirse "Revize iste" ile onayı geri alabilirsiniz</small></td></tr>${d.okAcik ? okListe.map(satir).join('') : ''}` : ''}
         </tbody></table></div></div>
     </section>
     <aside class="yan">
@@ -158,6 +169,28 @@ function ciz() {
   document.body.classList.toggle('mp-acik', !d.mpKapali)
   const g = $('#mpGovde'); if (g) g.scrollTop = g.scrollHeight
   baglantilar()
+}
+
+// Seçilen planlara aynı karar (13.11, Aytaç: çoklu seçim). Revize / eksikte tek not hepsine gider.
+async function topluKarar(karar) {
+  const idler = [...d.secili]
+  if (!idler.length) return
+  const ad = { ok: 'Onayla', rev: 'Revize', eks: 'Eksik' }[karar]
+  const k = pencere(`<h3>${idler.length} plan · ${ad}</h3>${karar === 'ok' ? `<div>Seçilen <b>${idler.length} plan</b> ONAYLANDI olacak.</div>` : `<label>${karar === 'rev' ? 'Ne düzeltilecek? (bütün seçilenlere gider)' : 'Ne eksik? (bütün seçilenlere gider)'}<textarea id="topNot" rows="3"></textarea></label>`}
+    <div class="satir"><button class="btn" data-v>Vazgeç</button><button class="btn ana" data-e>${idler.length} plana uygula</button></div>`)
+  k.querySelector('[data-v]').onclick = () => k.remove()
+  k.querySelector('[data-e]').onclick = async () => {
+    const not = k.querySelector('#topNot')?.value.trim() || ''
+    k.remove()
+    let hata = 0
+    for (const id of idler) {
+      const r = await sb.rpc('musteri_istek', { p_pid: d.pid, p_bolum: d.bolum, p_plan: id, p_tur: 'karar', p_veri: { karar, ...(not ? { not } : {}) }, p_kim: al('pp-kim') || null })
+      if (r.error) hata++
+    }
+    d.secili.clear()
+    await yukle()
+    tost(hata ? `${idler.length - hata} plan iletildi, ${hata} plan iletilemedi` : `${idler.length} plan ${({ ok: 'onaylandı', rev: 'revizeye gönderildi', eks: 'eksik bildirildi' })[karar]}`)
+  }
 }
 
 function pencere(html) { const k = document.createElement('div'); k.className = 'perde'; k.innerHTML = `<div class="pencere">${html}</div>`; k.onclick = (e) => { if (e.target === k) k.remove() }; document.body.appendChild(k); return k }
@@ -190,6 +223,14 @@ function baglantilar() {
       if (r) tost(r.ortak ? "Tarih isteğiniz Animasal'ın onayına gönderildi" : 'Teslim tarihi değiştirildi · Animasal’a iletildi')
     }
   }
+  // çoklu seçim (üstteki "hepsini seç" yalnızca üst listedekileri seçer, onaylananları değil)
+  document.querySelectorAll('[data-sec]').forEach((x) => (x.onchange = () => { x.checked ? d.secili.add(x.dataset.sec) : d.secili.delete(x.dataset.sec); ciz() }))
+  if ($('#hepsiSec')) $('#hepsiSec').onchange = (e) => { for (const id of d.ustSecilebilir || []) e.target.checked ? d.secili.add(id) : d.secili.delete(id); ciz() }
+  if ($('#secKaldir')) $('#secKaldir').onclick = () => { d.secili.clear(); ciz() }
+  if ($('#topOk')) $('#topOk').onclick = () => topluKarar('ok')
+  if ($('#topRev')) $('#topRev').onclick = () => topluKarar('rev')
+  if ($('#topEks')) $('#topEks').onclick = () => topluKarar('eks')
+  if ($('#okAcKapa')) $('#okAcKapa').onclick = () => { d.okAcik = !d.okAcik; ciz() }
   $('#kalanlar').onclick = () => { const n = sayac().gon; const k = pencere(`<h3>Kalanları onayla</h3><div>Onayınızı bekleyen <b>${n} plan</b> ONAYLANDI olacak. Revize ve eksik işaretledikleriniz değişmez.</div><div class="satir"><button class="btn" data-v>Vazgeç</button><button class="btn ana" data-e>${n} planı onayla</button></div>`)
     k.querySelector('[data-v]').onclick = () => k.remove(); k.querySelector('[data-e]').onclick = async () => { k.remove(); if (await istek('kalanlari-onayla', { planlar: planlar().filter((p) => gorunenDurum(p) === 'gon').map((p) => p.id) })) tost(n + ' plan onaylandı') } }
   const bp = $('#ppBildirim')
@@ -203,8 +244,8 @@ function baglantilar() {
       sakla('pp-gordu-' + d.pid, String(l[0]?.ms || 0)); e.stopPropagation(); ciz()
     }))
   }
-  document.querySelectorAll('[data-b]').forEach((x) => (x.onclick = () => { d.bolum = +x.dataset.b; d.suzgec = null; ciz() }))
-  document.querySelectorAll('[data-g]').forEach((x) => (x.onclick = () => { d.gorunum = x.dataset.g; d.suzgec = null; ciz() }))
+  document.querySelectorAll('[data-b]').forEach((x) => (x.onclick = () => { d.bolum = +x.dataset.b; d.suzgec = null; d.secili.clear(); ciz() }))
+  document.querySelectorAll('[data-g]').forEach((x) => (x.onclick = () => { d.gorunum = x.dataset.g; d.suzgec = null; d.secili.clear(); ciz() }))
   document.querySelectorAll('[data-s]').forEach((x) => (x.onclick = () => { d.suzgec = d.suzgec === x.dataset.s ? null : x.dataset.s; ciz() }))
   document.querySelectorAll('[data-msj]').forEach((x) => (x.onclick = () => { d.mpPlan = x.dataset.msj; d.mpKapali = false; ciz(); $('#mpMetin').focus() }))
   document.querySelectorAll('[data-acil]').forEach((x) => (x.onclick = async () => { const acik = x.getAttribute('aria-pressed') !== 'true'

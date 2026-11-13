@@ -149,3 +149,15 @@ body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset
 .ppb-satir i{flex:none;width:8px;height:8px;border-radius:50%;background:var(--r)}
 .ppb-satir time{flex:none;font:500 11px var(--f-kod);color:var(--soluk)}
 .ppb-satir span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+
+/* 13.11: çoklu seçim + onaylananlar bölümü */
+.sec{width:34px;text-align:center}
+.sec input{width:16px;height:16px;cursor:pointer}
+tr.secili td{background:var(--vurgu-acik)}
+.secim-serit{position:sticky;top:calc(64px + env(safe-area-inset-top,0px));z-index:5;display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:10px 18px;background:var(--vurgu-acik);border-top:1px solid var(--cizgi)}
+.secim-serit b{margin-right:auto}
+.ok-baslik td{background:var(--ok-z);padding:8px 10px}
+.ok-baslik button{border:0;background:none;color:var(--ok);font-weight:700;font-size:13px;padding:0}
+.ppb-ust .mp-rozet{white-space:nowrap}
+/* mesaj paneli açıkken orta genişlikte linkler tablonun altına iner (Kararınız sütunu kesilmesin) */
+@media (max-width:1560px){body.mp-acik .govde{grid-template-columns:minmax(0,1fr)}}
