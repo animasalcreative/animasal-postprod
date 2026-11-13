@@ -35,6 +35,14 @@ async function basla() {
   if (!g.data.projeler.some((p) => p.id === d.pid)) d.pid = g.data.projeler[0].id
   await yukle()
   setInterval(yukle, 30e3)
+  nabiz()
+  setInterval(nabiz, 30e3)
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') nabiz() })
+}
+// Animasal'ın Pipeline'ında "şu an sayfada" görünmek için (14.11): yalnızca sekme görünürken; hata sessiz (SQL çalıştırılmamış olabilir)
+function nabiz() {
+  if (document.visibilityState !== 'visible' || !d.pid) return
+  sb.rpc('musteri_nabiz', { p_pid: d.pid, p_kim: al('pp-kim') || null }).then(() => {}, () => {})
 }
 function girisEkrani(hata = '', cikis = false) {
   $('#kok').innerHTML = `<div class="kart giris"><img src="logo.png" alt="Animasal"><h1>Animasal · Post prod</h1>
@@ -195,10 +203,10 @@ async function topluKarar(karar) {
 
 function pencere(html) { const k = document.createElement('div'); k.className = 'perde'; k.innerHTML = `<div class="pencere">${html}</div>`; k.onclick = (e) => { if (e.target === k) k.remove() }; document.body.appendChild(k); return k }
 function baglantilar() {
-  $('#proje').onchange = (e) => { d.pid = e.target.value; d.bolum = null; yukle() }
+  $('#proje').onchange = (e) => { d.pid = e.target.value; d.bolum = null; yukle(); nabiz() }
   $('#cikis').onclick = async () => { await sb.auth.signOut(); location.reload() }
   $('#ara').oninput = (e) => { d.ara = e.target.value; ciz(); $('#ara').focus(); $('#ara').setSelectionRange(d.ara.length, d.ara.length) }
-  $('#mpKim').onchange = (e) => sakla('pp-kim', e.target.value.trim())
+  $('#mpKim').onchange = (e) => { sakla('pp-kim', e.target.value.trim()); nabiz() }
   $('#mpSes').onclick = () => { d.ses = !d.ses; sakla('pp-ses', d.ses ? '1' : '0'); if (d.ses) ding(); ciz() }
   $('#mpAcKapa').onclick = () => { d.mpKapali = !d.mpKapali; if (!d.mpKapali) d.okunmamis = 0; sakla('pp-mesaj-kapali', d.mpKapali ? '1' : '0'); ciz() }
   $('#mpForm').onsubmit = async (e) => { e.preventDefault(); const v = $('#mpMetin').value.trim(); if (!v) return
