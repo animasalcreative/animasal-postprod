@@ -34,7 +34,7 @@ async function basla() {
   if (!g.data.projeler.length) return girisEkrani(`${esc(g.data.eposta)} hiçbir projeye ekli değil. Animasal'a haber verildi; eklendiğinizde bu sayfadan girebilirsiniz.`, true)
   if (!g.data.projeler.some((p) => p.id === d.pid)) d.pid = g.data.projeler[0].id
   await yukle()
-  setInterval(yukle, 30e3)
+  setInterval(() => yukle({ arka: true }), 30e3)
   nabiz()
   setInterval(nabiz, 30e3)
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') nabiz() })
@@ -54,7 +54,7 @@ function girisEkrani(hata = '', cikis = false) {
 }
 
 // ---- veri ----
-async function yukle() {
+async function yukle({ arka = false } = {}) {
   const r = await sb.rpc('musteri_proje', { p_pid: d.pid })
   if (r.error) return tost('Yüklenemedi: ' + r.error.message)
   const eski = d.proje
@@ -65,7 +65,65 @@ async function yukle() {
   const yeniAnimasal = (d.proje.mesajlar || []).filter((m) => m.taraf === 'animasal' && m.id > d.sonMesaj)
   if (eski && yeniAnimasal.length) { ding(); if (d.mpKapali) d.okunmamis = (d.okunmamis || 0) + yeniAnimasal.length }
   d.sonMesaj = Math.max(0, ...(d.proje.mesajlar || []).map((m) => m.id))
+  // 30 sn'lik yenilemede açık bir seçim listesi (proje) kapanmasın: çizim bir sonraki yenilemeye kalır
+  const a = document.activeElement
+  if (arka && a && a.tagName === 'SELECT' && $('#kok').contains(a)) return
   ciz()
+}
+
+// ---- yeniden çizimde yazılanları koru (14.11) ----
+// ciz() bütün sayfayı innerHTML ile yeniden kurar; yazılmakta olan mesaj, "Yazan" adı, link kutusu ve açık revize / eksik notları
+// çizimden önce okunur, sonra değer + imleç (+ odak) geri konur.
+const KORUNAN = ['mpMetin', 'mpKim', 'linkGir', 'ara']
+function yazilariAl() {
+  const s = { alan: {}, notlar: [], odak: null, mpAlt: true, mpUst: 0 }
+  for (const id of KORUNAN) { const e = document.getElementById(id); if (e) s.alan[id] = { v: e.value, b: e.selectionStart, s: e.selectionEnd } }
+  document.querySelectorAll('.notkutu[data-p]').forEach((k) => { const t = k.querySelector('textarea'); s.notlar.push({ p: k.dataset.p, k: k.dataset.k, v: t.value, b: t.selectionStart, s: t.selectionEnd }) })
+  const a = document.activeElement
+  if (a && KORUNAN.includes(a.id)) s.odak = a.id
+  else if (a && a.closest && a.closest('.notkutu[data-p]')) s.odak = 'not:' + a.closest('.notkutu').dataset.p
+  const g = $('#mpGovde'); if (g) { s.mpAlt = g.scrollHeight - g.scrollTop - g.clientHeight < 40; s.mpUst = g.scrollTop }
+  return s
+}
+function yazilariKoy(s) {
+  const imlec = (e, x) => { try { if (x.b != null) e.setSelectionRange(x.b, x.s ?? x.b) } catch {} }
+  for (const [id, x] of Object.entries(s.alan)) {
+    const e = document.getElementById(id)
+    if (!e || id === 'ara') continue // arama d.ara'dan çizilir
+    if (e.value !== x.v) e.value = x.v
+  }
+  for (const n of s.notlar) if ($('#not-' + n.p)) notKutusu(n.p, n.k, n.v, false)
+  if (s.odak?.startsWith('not:')) { const t = document.querySelector(`.notkutu[data-p="${s.odak.slice(4)}"] textarea`); const n = s.notlar.find((x) => 'not:' + x.p === s.odak); if (t) { t.focus(); if (n) imlec(t, n) } }
+  else if (s.odak) { const e = document.getElementById(s.odak); if (e) { e.focus(); imlec(e, s.alan[s.odak]) } }
+  const g = $('#mpGovde'); if (g) g.scrollTop = s.mpAlt ? g.scrollHeight : s.mpUst
+}
+// Plan satırındaki revize / eksik not kutusu (açık kutu yeniden çizimde korunur)
+function notKutusu(pid, k, metin = '', odakla = true) {
+  const yer = $('#not-' + pid); if (!yer) return
+  yer.innerHTML = `<div class="notkutu" data-p="${esc(pid)}" data-k="${esc(k)}"><textarea placeholder="${k === 'rev' ? 'Ne düzeltilecek?' : 'Ne eksik?'}"></textarea><div class="satir"><button class="btn">${k === 'rev' ? 'Revize gönder' : 'Eksik olarak bildir'}</button></div></div>`
+  const t = yer.querySelector('textarea'); t.value = metin
+  if (odakla) t.focus()
+  yer.querySelector('button').onclick = async () => {
+    const not = t.value.trim()
+    yer.innerHTML = '' // gönderilirken kapanır; olmazsa yazıyla geri açılır
+    if (await istek('karar', { karar: k, not }, pid)) tost(k === 'rev' ? 'Revize gönderildi' : 'Eksik bildirildi')
+    else notKutusu(pid, k, not)
+  }
+}
+// Post prod'un eklediği link Pipeline işleyene kadar listede "iletiliyor…" diye görünür (14.11)
+d.yerelLinkler = [] // [{ link, tanitim, bolum, pid, zaman }]: gönderilen ama henüz istek listesinde görünmeyenler
+function bekleyenLinkler(b, tanitim) {
+  const P = d.proje, kayitli = new Set(((tanitim ? b.tanitimLinkleri : b.linkler) || []).map((l) => l.link))
+  const l = []
+  const gun = Date.now() - 864e5
+  for (const i of P.istekler || []) {
+    if (i.tur !== 'link' || i.bolum !== d.bolum || !!i.veri?.tanitim !== tanitim || kayitli.has(i.veri?.link)) continue
+    if (i.durum === 'yeni' || i.durum === 'isleniyor') l.push({ link: i.veri?.link, zaman: i.zaman, durum: 'iletiliyor' })
+    else if (i.durum === 'red' && Date.parse(i.zaman) > gun) l.push({ link: i.veri?.link, zaman: i.zaman, durum: 'red', not: i.cevap?.not })
+  }
+  d.yerelLinkler = d.yerelLinkler.filter((y) => y.pid === d.pid && !kayitli.has(y.link) && !(P.istekler || []).some((i) => i.tur === 'link' && i.veri?.link === y.link && i.durum !== 'yeni' && i.durum !== 'isleniyor'))
+  for (const y of d.yerelLinkler) if (y.bolum === d.bolum && y.tanitim === tanitim && !l.some((x) => x.link === y.link)) l.push({ link: y.link, zaman: y.zaman, durum: 'iletiliyor' })
+  return l
 }
 async function istek(tur, veri = {}, plan = null) {
   const r = await sb.rpc('musteri_istek', { p_pid: d.pid, p_bolum: d.bolum, p_plan: plan, p_tur: tur, p_veri: veri, p_kim: al('pp-kim') || null })
@@ -115,6 +173,7 @@ function bildirimPaneli() {
 }
 
 function ciz() {
+  const korunan = yazilariAl()
   const P = d.proje, b = (P.bolumler || []).find((x) => x.no === d.bolum) || {}, c = sayac()
   const parca = (n, renk) => `<i style="width:${c.toplam ? (n / c.toplam) * 100 : 0}%;background:var(${renk})"></i>`
   const kutu = (k, ad) => `<button class="sayi" data-s="${k}" aria-pressed="${d.suzgec === k}"><b>${k === 'toplam' ? c.toplam : c[k]}</b><span>${ad}</span></button>`
@@ -166,6 +225,7 @@ function ciz() {
       <div class="kart"><h2>Ortak kararlar</h2>${ortak.length ? ortak.map((i) => `<div class="istek"><b>${i.durum === 'ortak' ? "Animasal'ın cevabı bekleniyor" : 'Animasal karşı öneri yaptı'}</b><div>${esc(i.tur === 'acil' ? 'Acil isteği' : 'Teslim tarihi: ' + tarih(i.veri?.tarih))}</div>${i.durum === 'karsi' ? `<div>${esc(i.cevap?.metin || '')}</div><div class="satir"><button class="btn" data-ik="0" data-id="${i.id}">Kabul etmiyorum</button><button class="btn ana" data-ik="1" data-id="${i.id}">Kabul et</button></div>` : ''}</div>`).join('') : `<div class="gizli-not">Acil sınırı (${P.ayar.acilSinir}) üstü ve erken teslim tarihi Animasal'la birlikte kararlaştırılır.</div>`}</div>
       <div class="kart"><h2>${d.gorunum === 'tanitim' ? 'Tanıtım linkleri' : 'Plate linkleri'}</h2><div class="gizli-not">WeTransfer linkini yapıştırın; planlar Animasal'da kendiliğinden oluşur.</div>
         <form class="linkgir" id="linkForm"><input id="linkGir" placeholder="https://we.tl/…" aria-label="WeTransfer linki"><button class="btn">Ekle</button></form>
+        ${bekleyenLinkler(b, d.gorunum === 'tanitim').map((l) => `<div class="link ${l.durum === 'red' ? 'link-red' : 'link-bekliyor'}"><code>${esc(l.link)}</code><small>${tarih(l.zaman)} · ${l.durum === 'red' ? `okunamadı${l.not ? ': ' + esc(l.not) : ''}` : "Animasal'a iletiliyor…"}</small></div>`).join('')}
         ${((d.gorunum === 'tanitim' ? b.tanitimLinkleri : b.linkler) || []).map((l) => `<div class="link"><code>${esc(l.link)}</code><small>${tarih(l.zaman)} · ${l.dosya} dosya</small></div>`).join('')}</div>
       <div class="kart"><h2>Animasal teslimleri</h2>${[...new Map(planlar().filter((p) => p.teslimLink).map((p) => [p.teslimLink, p])).values()].map((p) => `<div class="link"><code>${esc(p.teslimLink)}</code><small>${tarih(p.teslimZaman)} · ${planlar().filter((x) => x.teslimLink === p.teslimLink).length} plan</small></div>`).join('') || '<div class="gizli-not">Henüz teslim linki yok.</div>'}</div>
     </aside></div>
@@ -175,8 +235,8 @@ function ciz() {
     <div class="mp-kim">Yazan: <input id="mpKim" placeholder="adınız" value="${esc(al('pp-kim') || '')}"> <span>(ortak hesapta ayırmak için)</span></div>
     <form class="mp-yaz" id="mpForm"><textarea id="mpMetin" placeholder="${d.mpPlan ? esc(d.mpPlan) + ' hakkında yazın…' : 'Mesaj yazın…'}"></textarea><button class="btn ana">Gönder</button></form></aside>`
   document.body.classList.toggle('mp-acik', !d.mpKapali)
-  const g = $('#mpGovde'); if (g) g.scrollTop = g.scrollHeight
   baglantilar()
+  yazilariKoy(korunan)
 }
 
 // Seçilen planlara aynı karar (13.11, Aytaç: çoklu seçim). Revize / eksikte tek not hepsine gider.
@@ -212,10 +272,15 @@ function baglantilar() {
   $('#mpForm').onsubmit = async (e) => { e.preventDefault(); const v = $('#mpMetin').value.trim(); if (!v) return
     const r = await sb.rpc('musteri_mesaj', { p_pid: d.pid, p_metin: v, p_bolum: d.bolum, p_plan: d.mpPlan, p_kim: al('pp-kim') || null })
     if (r.error) return tost('Gönderilemedi: ' + r.error.message)
+    $('#mpMetin').value = '' // gönderildi: yeniden çizimde geri konmasın
     d.mpPlan = null; yukle() }
   $('#linkForm').onsubmit = async (e) => { e.preventDefault(); const v = $('#linkGir').value.trim()
     if (!/we\.tl|wetransfer\.com/i.test(v)) return tost('Şimdilik yalnızca WeTransfer linki okunabiliyor. Başka servis için linki mesajla gönderin.')
-    if (await istek('link', { link: v, tanitim: d.gorunum === 'tanitim' })) tost("Link eklendi · Animasal okuyacak") }
+    // listede hemen "iletiliyor…" diye görünür; kutu boşalır (olmazsa yazı geri gelir)
+    const y = { link: v, tanitim: d.gorunum === 'tanitim', bolum: d.bolum, pid: d.pid, zaman: new Date().toISOString() }
+    d.yerelLinkler.push(y); $('#linkGir').value = ''; ciz()
+    if (await istek('link', { link: v, tanitim: y.tanitim })) tost("Link eklendi · Animasal'a iletiliyor")
+    else { d.yerelLinkler = d.yerelLinkler.filter((x) => x !== y); ciz(); if ($('#linkGir')) $('#linkGir').value = v } }
   if ($('#tarihDegis')) $('#tarihDegis').onclick = () => {
     const b = (d.proje.bolumler || []).find((x) => x.no === d.bolum) || {}
     const yerel = (t) => { const z = t ? new Date(t) : new Date(Date.now() + 2 * 864e5); z.setMinutes(z.getMinutes() - z.getTimezoneOffset()); return z.toISOString().slice(0, 16) }
@@ -261,9 +326,7 @@ function baglantilar() {
   document.querySelectorAll('[data-ik]').forEach((x) => (x.onclick = async () => { await istek('ortak-cevap', { istek: +x.dataset.id, kabul: x.dataset.ik === '1' }) }))
   document.querySelectorAll('[data-k]').forEach((x) => (x.onclick = async () => {
     if (x.dataset.k === 'ok') { if (await istek('karar', { karar: 'ok' }, x.dataset.p)) tost('Onaylandı'); return }
-    const yer = $('#not-' + x.dataset.p); yer.innerHTML = `<div class="notkutu"><textarea placeholder="${x.dataset.k === 'rev' ? 'Ne düzeltilecek?' : 'Ne eksik?'}"></textarea><div class="satir"><button class="btn">${x.dataset.k === 'rev' ? 'Revize gönder' : 'Eksik olarak bildir'}</button></div></div>`
-    yer.querySelector('textarea').focus()
-    yer.querySelector('button').onclick = async () => { if (await istek('karar', { karar: x.dataset.k, not: yer.querySelector('textarea').value.trim() }, x.dataset.p)) tost(x.dataset.k === 'rev' ? 'Revize gönderildi' : 'Eksik bildirildi') }
+    notKutusu(x.dataset.p, x.dataset.k)
   }))
 }
 

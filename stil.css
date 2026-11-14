@@ -161,3 +161,7 @@ tr.secili td{background:var(--vurgu-acik)}
 .ppb-ust .mp-rozet{white-space:nowrap}
 /* mesaj paneli açıkken orta genişlikte linkler tablonun altına iner (Kararınız sütunu kesilmesin) */
 @media (max-width:1560px){body.mp-acik .govde{grid-template-columns:minmax(0,1fr)}}
+/* eklenen link Pipeline işleyene kadar (14.11) */
+.link-bekliyor{border:1px dashed var(--sira);background:var(--sira-z)}
+.link-bekliyor small{color:var(--sira);font-weight:600}
+.link-red{background:var(--rev-z)} .link-red small{color:var(--rev)}
