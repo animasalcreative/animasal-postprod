@@ -59,6 +59,8 @@ async function yukle({ arka = false } = {}) {
   if (r.error) return tost('Yüklenemedi: ' + r.error.message)
   const eski = d.proje
   d.proje = r.data
+  // Pipeline bölümü "teslim edildi" deyince durum = teslim yazar (teslimEdildi alanı yazılmaz)
+  for (const b of d.proje.bolumler || []) b.teslimEdildi = b.durum === 'teslim' || b.teslimEdildi === true || b.teslimEdildi === 'true'
   sakla('pp-proje', d.pid)
   const acik = (d.proje.bolumler || []).filter((b) => !b.teslimEdildi)
   if (d.bolum == null || !d.proje.bolumler.some((b) => b.no === d.bolum)) d.bolum = (acik[acik.length - 1] || d.proje.bolumler[d.proje.bolumler.length - 1] || {}).no ?? null
