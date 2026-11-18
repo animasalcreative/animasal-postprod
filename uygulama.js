@@ -204,7 +204,7 @@ function ciz() {
     <div class="proje"><select id="proje" aria-label="Proje">${d.giris.projeler.map((p) => `<option value="${p.id}" ${p.id === d.pid ? 'selected' : ''}>${esc(p.ad)}</option>`).join('')}</select>
     <div class="kim"><span class="av">${esc((d.giris.eposta[0] || '?').toUpperCase())}</span>${esc(d.giris.eposta)}</div><button class="btn" id="cikis">Çıkış</button></div></div></header>
   <main class="dis">
-    <nav class="sekmeler" role="tablist">${(P.bolumler || []).map((x) => `<button class="sekme" role="tab" aria-selected="${x.no === d.bolum}" data-b="${x.no}">${esc(x.ad || 'Bölüm ' + x.no)}<small>${x.teslimEdildi ? '✓' : tarih(x.teslim).split(' ')[0] || ''}</small></button>`).join('')}</nav>
+    <nav class="sekmeler" role="tablist">${(() => { const { ust, eski } = ustBolumler(P.bolumler); return (eski.length ? `<select id="eskiBolum" class="sekme" aria-label="Eski bölümler"><option value="">Eski bölümler (${eski.length}) ▾</option>${eski.map((x) => `<option value="${x.no}" ${x.no === d.bolum ? 'selected' : ''}>${esc(x.ad || 'Bölüm ' + x.no)}${x.teslimEdildi ? ' ✓' : ''}</option>`).join('')}</select>` : '') + ust.map((x) => `<button class="sekme" role="tab" aria-selected="${x.no === d.bolum}" data-b="${x.no}">${esc(x.ad || 'Bölüm ' + x.no)}<small>${x.teslimEdildi ? '✓' : tarih(x.teslim).split(' ')[0] || ''}</small></button>`).join('') })()}</nav>
     <div class="govde"><section>
       <div class="kart ozet"><div class="ozet-ust"><div><h1>${esc(P.ad)}${b.no != null ? ' · Bölüm ' + b.no : ''}${d.gorunum === 'tanitim' ? ' · Tanıtım' : ''}</h1><div class="alt">Bağlı planlar ana planla tek sayılır · iptaller hariç</div></div>
         <div class="teslim"><div><div class="etiket">Teslim tarihi</div><div class="tarih">${b.teslimEdildi ? 'Teslim edildi' : tarih(b.teslim)}</div></div>${!b.teslimEdildi && P.ayar.tarihDegistir ? `<button class="btn" id="tarihDegis">${(P.istekler || []).some((i) => i.tur === 'teslim-tarihi' && i.bolum === d.bolum && ['yeni', 'ortak', 'karsi'].includes(i.durum)) ? 'Tarih isteğiniz iletildi' : 'Tarihi değiştir'}</button>` : ''}</div></div>
@@ -320,6 +320,7 @@ function baglantilar() {
     }))
   }
   document.querySelectorAll('[data-b]').forEach((x) => (x.onclick = () => { d.bolum = +x.dataset.b; d.suzgec = null; d.secili.clear(); ciz() }))
+  const eb = document.getElementById('eskiBolum'); if (eb) eb.onchange = () => { if (eb.value === '') return; d.bolum = +eb.value; d.suzgec = null; d.secili.clear(); ciz() }
   document.querySelectorAll('[data-g]').forEach((x) => (x.onclick = () => { d.gorunum = x.dataset.g; d.suzgec = null; d.secili.clear(); ciz() }))
   document.querySelectorAll('[data-s]').forEach((x) => (x.onclick = () => { d.suzgec = d.suzgec === x.dataset.s ? null : x.dataset.s; ciz() }))
   document.querySelectorAll('[data-msj]').forEach((x) => (x.onclick = () => { d.mpPlan = x.dataset.msj; d.mpKapali = false; ciz(); $('#mpMetin').focus() }))
@@ -333,3 +334,12 @@ function baglantilar() {
 }
 
 basla()
+
+// Üstte en fazla 5 bölüm: teslim edilmemişlerin hepsi + kalan yere en son teslim edilenler (en az 1); gerisi "Eski bölümler"
+function ustBolumler(bolumler, sinir = 5) {
+  const sirali = [...(bolumler || [])].sort((a, b) => a.no - b.no)
+  const acik = sirali.filter((b) => !b.teslimEdildi)
+  const teslim = sirali.filter((b) => b.teslimEdildi)
+  const ustSet = new Set([...acik, ...teslim.slice(-Math.max(1, sinir - acik.length))])
+  return { ust: sirali.filter((b) => ustSet.has(b)), eski: sirali.filter((b) => !ustSet.has(b)).reverse() }
+}
